@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dither</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Courier New', monospace;
+    background: #0f0f0f;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    padding: 14px 24px;
+    border-bottom: 1px solid #222;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header h1 { font-size: 13px; font-weight: normal; letter-spacing: 0.15em; text-transform: uppercase; color: #555; }
+  header span { font-size: 13px; color: #e0e0e0; }
+
+  .workspace {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: 0;
+  }
+
+  .sidebar {
+    border-right: 1px solid #222;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    overflow-y: auto;
+  }
+
+  /* --- Mode tabs --- */
+  .tabs {
+    display: flex;
+    gap: 0;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .tab {
+    flex: 1;
+    padding: 7px 10px;
+    background: #151515;
+    border: none;
+    color: #555;
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    text-align: center;
+  }
+  .tab + .tab { border-left: 1px solid #2a2a2a; }
+  .tab:hover { background: #1c1c1c; color: #999; }
+  .tab.on { background: #222; color: #e0e0e0; }
+
+  /* --- Section label --- */
+  .sec-label {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #666;
+    margin-bottom: 10px;
+  }
+
+  /* --- Upload zone --- */
+  .upload-zone {
+    border: 1px dashed #2a2a2a;
+    border-radius: 3px;
+    padding: 18px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .upload-zone:hover, .upload-zone.over { border-color: #777; background: #141414; }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-zone p { font-size: 13px; color: #777; pointer-events: none; line-height: 1.6; }
+  .upload-zone strong { color: #bbb; font-weight: normal; }
+
+  /* --- Text mode controls --- */
+  textarea {
+    width: 100%;
+    background: #111;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 9px 10px;
+    resize: vertical;
+    min-height: 72px;
+    line-height: 1.5;
+    outline: none;
+    transition: border-color 0.12s;
+  }
+  textarea:focus { border-color: #555; }
+  textarea::placeholder { color: #3a3a3a; }
+
+  .font-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .font-status {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #2a2a2a;
+    flex-shrink: 0;
+    transition: background 0.2s;
+  }
+  .font-status.loading { background: #885500; }
+  .font-status.ready   { background: #336633; }
+
+  /* --- Shared controls --- */
+  .control { display: flex; flex-direction: column; gap: 7px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+
+  label { font-size: 13px; color: #aaa; white-space: nowrap; flex-shrink: 0; }
+
+  select {
+    background: #151515;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    color: #e0e0e0;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 7px 28px 7px 10px;
+    cursor: pointer;
+    width: 100%;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23666'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+  }
+  select:focus { outline: none; border-color: #666; }
+
+  input[type="range"] {
+    flex: 1;
+    height: 3px;
+    accent-color: #bbb;
+    cursor: pointer;
+  }
+
+  .val { font-size: 13px; color: #888; min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  input[type="color"] {
+    width: 28px;
+    height: 28px;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    background: #151515;
+    padding: 2px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  input[type="color"]::-webkit-color-swatch { border: none; border-radius: 2px; }
+
+  .btn {
+    padding: 7px 12px;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    background: #151515;
+    color: #ddd;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s, color 0.12s;
+    width: 100%;
+    letter-spacing: 0.04em;
+  }
+  .btn:hover { border-color: #666; background: #1e1e1e; color: #fff; }
+  .btn:active { background: #222; }
+  .btn:disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+  .btn.hi { border-color: #555; color: #fff; }
+  .btn.hi:hover { border-color: #aaa; }
+
+  .btn-row { display: flex; gap: 7px; }
+
+  .scale-row { display: flex; gap: 5px; }
+  .sbtn {
+    flex: 1;
+    padding: 6px 4px;
+    font-size: 12px;
+    border: 1px solid #2a2a2a;
+    border-radius: 3px;
+    background: #151515;
+    color: #777;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.12s;
+    text-align: center;
+  }
+  .sbtn:hover { border-color: #555; color: #bbb; }
+  .sbtn.on { border-color: #666; color: #fff; background: #222; }
+
+  .algo-desc {
+    font-size: 12px;
+    color: #666;
+    line-height: 1.55;
+    padding: 9px 10px;
+    background: #111;
+    border: 1px solid #1e1e1e;
+    border-radius: 3px;
+    min-height: 48px;
+  }
+
+  .stats { font-size: 12px; color: #666; display: flex; justify-content: space-between; padding-top: 8px; }
+
+  hr { border: none; border-top: 1px solid #1a1a1a; }
+
+  /* --- Canvas area --- */
+  .canvas-area {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #080808;
+    overflow: auto;
+    padding: 40px;
+  }
+
+  .empty {
+    text-align: center;
+    color: #222;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+  .empty div { font-size: 36px; margin-bottom: 10px; }
+
+  .canvas-wrap { display: none; gap: 28px; align-items: flex-start; }
+
+  .cpanel { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .clabel { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #555; }
+
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    border: 1px solid #1a1a1a;
+    flex-shrink: 0;
+    transition: width 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94),
+                height 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+
+  .src-panel { display: flex; flex-direction: column; gap: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>dither</h1>
+  <span>&mdash;</span>
+  <span id="modeLabel">image converter</span>
+</header>
+
+<div class="workspace">
+  <div class="sidebar">
+
+    <!-- Mode tabs -->
+    <div class="tabs">
+      <button class="tab on" data-mode="image">Image</button>
+      <button class="tab" data-mode="text">Text</button>
+    </div>
+
+    <!-- Image source -->
+    <div id="imgSrc" class="src-panel">
+      <div class="sec-label">Source Image</div>
+      <div class="upload-zone" id="zone">
+        <input type="file" id="file" accept="image/*">
+        <p><strong>Drop image here</strong><br>or click to browse</p>
+      </div>
+    </div>
+
+    <!-- Text source -->
+    <div id="txtSrc" class="src-panel" style="display:none">
+      <div class="sec-label">Text</div>
+      <textarea id="textInput" placeholder="Type something…" rows="3">DITHER</textarea>
+
+      <div class="control">
+        <div class="sec-label" style="margin-bottom:4px">Font</div>
+        <div class="font-row">
+          <div class="font-status" id="fontStatus"></div>
+          <select id="fontFamily" style="flex:1"></select>
+        </div>
+
+        <div class="row">
+          <label>Weight</label>
+          <select id="fontWeight" style="flex:1; width:auto; padding:5px 28px 5px 8px; font-size:12px"></select>
+        </div>
+
+        <div class="row">
+          <label>Size</label>
+          <input type="range" id="fontSize" min="16" max="400" value="120">
+          <span class="val" id="fontSizeV">120</span>
+        </div>
+
+        <div class="row">
+          <label>Tracking</label>
+          <input type="range" id="tracking" min="-10" max="60" value="0">
+          <span class="val" id="trackingV">0</span>
+        </div>
+
+        <div class="row">
+          <label>Leading</label>
+          <input type="range" id="leading" min="70" max="200" value="115">
+          <span class="val" id="leadingV">115%</span>
+        </div>
+
+        <div class="row">
+          <label>Padding</label>
+          <input type="range" id="padding" min="0" max="120" value="20">
+          <span class="val" id="paddingV">20</span>
+        </div>
+
+        <div class="row">
+          <label>Color</label>
+          <input type="color" id="fontColor" value="#000000">
+          <input type="color" id="bgColor" value="#ffffff">
+          <span class="val" style="font-size:11px;color:#555">fg&nbsp;bg</span>
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- Algorithm — shared -->
+    <div class="control">
+      <div class="sec-label">Algorithm</div>
+      <select id="algo">
+        <optgroup label="Error Diffusion">
+          <option value="floyd">Floyd-Steinberg</option>
+          <option value="atkinson">Atkinson</option>
+          <option value="jarvis">Jarvis-Judice-Ninke</option>
+          <option value="stucki">Stucki</option>
+          <option value="burkes">Burkes</option>
+          <option value="sierra">Sierra</option>
+        </optgroup>
+        <optgroup label="Ordered">
+          <option value="bayer2">Bayer 2&times;2</option>
+          <option value="bayer4">Bayer 4&times;4</option>
+          <option value="bayer8">Bayer 8&times;8</option>
+        </optgroup>
+        <optgroup label="Simple">
+          <option value="threshold">Threshold</option>
+          <option value="random">Random Noise</option>
+        </optgroup>
+      </select>
+      <div class="algo-desc" id="desc"></div>
+    </div>
+
+    <!-- Adjustments — shared -->
+    <div class="control">
+      <div class="sec-label">Adjustments</div>
+      <div class="row">
+        <label>Threshold</label>
+        <input type="range" id="thr" min="0" max="255" value="128">
+        <span class="val" id="thrV">128</span>
+      </div>
+      <div class="row">
+        <label>Brightness</label>
+        <input type="range" id="bri" min="-100" max="100" value="0">
+        <span class="val" id="briV">0</span>
+      </div>
+      <div class="row">
+        <label>Contrast</label>
+        <input type="range" id="con" min="-100" max="100" value="0">
+        <span class="val" id="conV">0</span>
+      </div>
+      <div class="row">
+        <label>Pixelate</label>
+        <input type="range" id="pix" min="1" max="32" value="1">
+        <span class="val" id="pixV">1px</span>
+      </div>
+    </div>
+
+    <!-- Display scale — shared -->
+    <div class="control">
+      <div class="sec-label">Display Scale</div>
+      <div class="scale-row" id="scaleRow">
+        <button class="sbtn" data-s="0.25">0.25x</button>
+        <button class="sbtn" data-s="0.5">0.5x</button>
+        <button class="sbtn on" data-s="1">1x</button>
+        <button class="sbtn" data-s="2">2x</button>
+        <button class="sbtn" data-s="4">4x</button>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- Export — shared -->
+    <div class="control">
+      <div class="sec-label">Export</div>
+      <div class="btn-row">
+        <button class="btn hi" id="btnSvg" disabled>SVG</button>
+        <button class="btn" id="btnPng" disabled>PNG</button>
+      </div>
+      <div class="stats" id="stats"><span></span><span></span></div>
+    </div>
+
+  </div>
+
+  <div class="canvas-area">
+    <div class="empty" id="empty">
+      <div>&#9632;</div>
+      load an image or switch to text mode
+    </div>
+    <div class="canvas-wrap" id="wrap">
+      <div class="cpanel">
+        <div class="clabel">Original</div>
+        <canvas id="src"></canvas>
+      </div>
+      <div class="cpanel">
+        <div class="clabel">Dithered</div>
+        <canvas id="out"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Google Fonts catalogue
+// ============================================================
+const FONT_CATALOGUE = [
+  { name: 'Playfair Display',   cat: 'Serif',     weights: [400,700,900] },
+  { name: 'Cormorant Garamond', cat: 'Serif',     weights: [300,400,600,700] },
+  { name: 'Lora',               cat: 'Serif',     weights: [400,600,700] },
+  { name: 'EB Garamond',        cat: 'Serif',     weights: [400,500,700,800] },
+  { name: 'Merriweather',       cat: 'Serif',     weights: [300,400,700,900] },
+  { name: 'Inter',              cat: 'Sans-serif', weights: [300,400,500,600,700,800,900] },
+  { name: 'DM Sans',            cat: 'Sans-serif', weights: [300,400,500,700] },
+  { name: 'Space Grotesk',      cat: 'Sans-serif', weights: [300,400,500,600,700] },
+  { name: 'Outfit',             cat: 'Sans-serif', weights: [100,300,400,500,600,700,900] },
+  { name: 'Barlow',             cat: 'Sans-serif', weights: [300,400,500,600,700,800,900] },
+  { name: 'Bebas Neue',         cat: 'Display',   weights: [400] },
+  { name: 'Oswald',             cat: 'Display',   weights: [300,400,500,600,700] },
+  { name: 'Righteous',          cat: 'Display',   weights: [400] },
+  { name: 'Lobster',            cat: 'Display',   weights: [400] },
+  { name: 'Alfa Slab One',      cat: 'Display',   weights: [400] },
+  { name: 'Space Mono',         cat: 'Monospace', weights: [400,700] },
+  { name: 'JetBrains Mono',     cat: 'Monospace', weights: [300,400,500,700,800] },
+  { name: 'Share Tech Mono',    cat: 'Monospace', weights: [400] },
+  { name: 'Pacifico',           cat: 'Script',    weights: [400] },
+  { name: 'Dancing Script',     cat: 'Script',    weights: [400,600,700] },
+  { name: 'Caveat',             cat: 'Script',    weights: [400,600,700] },
+];
+
+const loadedFonts = new Set();
+
+function loadGoogleFont(name, weights) {
+  const key = name + ':' + weights.join(',');
+  if (loadedFonts.has(key)) return Promise.resolve();
+  loadedFonts.add(key);
+  return new Promise(resolve => {
+    const wStr = weights.join(';');
+    const href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(name)}:wght@${wStr}&display=swap`;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.onload = resolve;
+    link.onerror = resolve; // resolve anyway so UI doesn't hang
+    document.head.appendChild(link);
+  });
+}
+
+// Populate font selector
+const fontFamilySel = document.getElementById('fontFamily');
+const fontWeightSel = document.getElementById('fontWeight');
+
+(function buildFontSelect() {
+  const cats = [...new Set(FONT_CATALOGUE.map(f => f.cat))];
+  cats.forEach(cat => {
+    const grp = document.createElement('optgroup');
+    grp.label = cat;
+    FONT_CATALOGUE.filter(f => f.cat === cat).forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.name;
+      opt.textContent = f.name;
+      grp.appendChild(opt);
+    });
+    fontFamilySel.appendChild(grp);
+  });
+})();
+
+function updateWeightSelect(fontName) {
+  const entry = FONT_CATALOGUE.find(f => f.name === fontName);
+  const weights = entry ? entry.weights : [400];
+  const prev = fontWeightSel.value;
+  fontWeightSel.innerHTML = '';
+  const NAMES = {100:'Thin',200:'ExtraLight',300:'Light',400:'Regular',500:'Medium',600:'SemiBold',700:'Bold',800:'ExtraBold',900:'Black'};
+  weights.forEach(w => {
+    const opt = document.createElement('option');
+    opt.value = w;
+    opt.textContent = `${w} — ${NAMES[w] || w}`;
+    fontWeightSel.appendChild(opt);
+  });
+  // Restore closest weight
+  const closest = weights.reduce((a, b) => Math.abs(b - prev) < Math.abs(a - prev) ? b : a, weights[0]);
+  fontWeightSel.value = closest;
+}
+
+// ============================================================
+// Element refs
+// ============================================================
+const fileInput   = document.getElementById('file');
+const zone        = document.getElementById('zone');
+const algoSel     = document.getElementById('algo');
+const descEl      = document.getElementById('desc');
+const thrSlider   = document.getElementById('thr');
+const briSlider   = document.getElementById('bri');
+const conSlider   = document.getElementById('con');
+const thrV        = document.getElementById('thrV');
+const briV        = document.getElementById('briV');
+const conV        = document.getElementById('conV');
+const srcCanvas   = document.getElementById('src');
+const outCanvas   = document.getElementById('out');
+const srcCtx      = srcCanvas.getContext('2d');
+const outCtx      = outCanvas.getContext('2d');
+const btnSvg      = document.getElementById('btnSvg');
+const btnPng      = document.getElementById('btnPng');
+const empty       = document.getElementById('empty');
+const wrap        = document.getElementById('wrap');
+const statsEl     = document.getElementById('stats');
+const scaleRow    = document.getElementById('scaleRow');
+const textInput   = document.getElementById('textInput');
+const fontSizeSl  = document.getElementById('fontSize');
+const fontSizeV   = document.getElementById('fontSizeV');
+const trackingSl  = document.getElementById('tracking');
+const trackingV   = document.getElementById('trackingV');
+const leadingSl   = document.getElementById('leading');
+const leadingV    = document.getElementById('leadingV');
+const paddingSl   = document.getElementById('padding');
+const paddingV    = document.getElementById('paddingV');
+const pixSlider   = document.getElementById('pix');
+const pixV        = document.getElementById('pixV');
+const fontStatus  = document.getElementById('fontStatus');
+const fontColorPicker = document.getElementById('fontColor');
+const bgColorPicker   = document.getElementById('bgColor');
+const modeLabel   = document.getElementById('modeLabel');
+const imgSrcEl    = document.getElementById('imgSrc');
+const txtSrcEl    = document.getElementById('txtSrc');
+
+// ============================================================
+// State
+// ============================================================
+let mode         = 'image'; // 'image' | 'text'
+let imgW = 0, imgH = 0;
+let sourceReady  = false;
+let dithered     = null;
+let scale        = 1;
+
+// ============================================================
+// Algorithm data
+// ============================================================
+const DESCS = {
+  floyd:     'Classic error diffusion. Propagates error to 4 neighbours. Sharp, detailed, naturalistic.',
+  atkinson:  'Apple origin. Spreads only 75% of error — retains highlights and shadows. Clean, high-contrast.',
+  jarvis:    '12-neighbour diffusion. Smoother gradients with softer edges.',
+  stucki:    'Jarvis variant with adjusted weights. Slightly sharper with good tonal range.',
+  burkes:    'Two-row simplified Jarvis. Fast and high quality, no ringing.',
+  sierra:    'Three-row diffusion, balanced between sharpness and smoothness.',
+  bayer2:    '2×2 ordered matrix. Minimal, produces a tight crosshatch pattern.',
+  bayer4:    '4×4 ordered matrix. Classic halftone screen-door texture.',
+  bayer8:    '8×8 ordered matrix. Smooth gradients with visible grid structure.',
+  threshold: 'Hard luminance cutoff. No diffusion. Stark, posterized result.',
+  random:    'Threshold with uniform random noise offset. Grainy, organic texture.',
+};
+
+const B2 = [[0,2],[3,1]];
+const B4 = [[ 0, 8, 2,10],[12, 4,14, 6],[ 3,11, 1, 9],[15, 7,13, 5]];
+const B8 = [
+  [ 0,32, 8,40, 2,34,10,42],[48,16,56,24,50,18,58,26],
+  [12,44, 4,36,14,46, 6,38],[60,28,52,20,62,30,54,22],
+  [ 3,35,11,43, 1,33, 9,41],[51,19,59,27,49,17,57,25],
+  [15,47, 7,39,13,45, 5,37],[63,31,55,23,61,29,53,21],
+];
+
+const KERNELS = {
+  floyd:    { k: [[1,0,7],[-1,1,3],[0,1,5],[1,1,1]], d: 16 },
+  atkinson: { k: [[1,0,1],[2,0,1],[-1,1,1],[0,1,1],[1,1,1],[0,2,1]], d: 8 },
+  jarvis:   { k: [[1,0,7],[2,0,5],[-2,1,3],[-1,1,5],[0,1,7],[1,1,5],[2,1,3],[-2,2,1],[-1,2,3],[0,2,5],[1,2,3],[2,2,1]], d: 48 },
+  stucki:   { k: [[1,0,8],[2,0,4],[-2,1,2],[-1,1,4],[0,1,8],[1,1,4],[2,1,2],[-2,2,1],[-1,2,2],[0,2,4],[1,2,2],[2,2,1]], d: 42 },
+  burkes:   { k: [[1,0,8],[2,0,4],[-2,1,2],[-1,1,4],[0,1,8],[1,1,4],[2,1,2]], d: 32 },
+  sierra:   { k: [[1,0,5],[2,0,3],[-2,1,2],[-1,1,4],[0,1,5],[1,1,4],[2,1,2],[-1,2,2],[0,2,3],[1,2,2]], d: 32 },
+};
+
+// ============================================================
+// Core helpers
+// ============================================================
+function luminance(r, g, b) { return 0.299*r + 0.587*g + 0.114*b; }
+
+function adjust(v, bri, con) {
+  v += bri;
+  if (con !== 0) {
+    const f = (259 * (con + 255)) / (255 * (259 - con));
+    v = f * (v - 128) + 128;
+  }
+  return v < 0 ? 0 : v > 255 ? 255 : v;
+}
+
+// ============================================================
+// Dither engine
+// ============================================================
+function runDither() {
+  if (!sourceReady) return;
+
+  const algo    = algoSel.value;
+  const thr     = +thrSlider.value;
+  const bri     = +briSlider.value;
+  const con     = +conSlider.value;
+  const pixSize = +pixSlider.value;
+  const w = imgW, h = imgH;
+
+  // Pixelation: downscale then upscale with nearest-neighbour
+  let rawSource;
+  if (pixSize > 1) {
+    const pw = Math.max(1, Math.floor(w / pixSize));
+    const ph = Math.max(1, Math.floor(h / pixSize));
+    const tmpA = document.createElement('canvas');
+    tmpA.width = pw; tmpA.height = ph;
+    const ctxA = tmpA.getContext('2d');
+    ctxA.imageSmoothingEnabled = true;
+    ctxA.drawImage(srcCanvas, 0, 0, pw, ph);
+    const tmpB = document.createElement('canvas');
+    tmpB.width = w; tmpB.height = h;
+    const ctxB = tmpB.getContext('2d');
+    ctxB.imageSmoothingEnabled = false;
+    ctxB.drawImage(tmpA, 0, 0, w, h);
+    rawSource = ctxB.getImageData(0, 0, w, h).data;
+  } else {
+    rawSource = srcCtx.getImageData(0, 0, w, h).data;
+  }
+
+  const raw = rawSource;
+  const buf = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    buf[i] = adjust(luminance(raw[i*4], raw[i*4+1], raw[i*4+2]), bri, con);
+  }
+
+  const out = new Uint8Array(w * h);
+
+  if (algo === 'threshold') {
+    for (let i = 0; i < w * h; i++) out[i] = buf[i] >= thr ? 255 : 0;
+
+  } else if (algo === 'random') {
+    for (let i = 0; i < w * h; i++) {
+      out[i] = (buf[i] + (Math.random() - 0.5) * 128) >= thr ? 255 : 0;
+    }
+
+  } else if (algo === 'bayer2' || algo === 'bayer4' || algo === 'bayer8') {
+    const m  = algo === 'bayer2' ? B2 : algo === 'bayer4' ? B4 : B8;
+    const n  = m.length;
+    const sz = n * n;
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++)
+        out[y*w+x] = buf[y*w+x] > (m[y%n][x%n] / sz) * 255 ? 255 : 0;
+
+  } else {
+    const { k, d } = KERNELS[algo];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i   = y*w+x;
+        const old = buf[i];
+        const neu = old >= thr ? 255 : 0;
+        out[i] = neu;
+        const err = old - neu;
+        if (err === 0) continue;
+        for (let j = 0; j < k.length; j++) {
+          const nx = x + k[j][0], ny = y + k[j][1];
+          if (nx >= 0 && nx < w && ny >= 0 && ny < h)
+            buf[ny*w+nx] += (err * k[j][2]) / d;
+        }
+      }
+    }
+  }
+
+  dithered = out;
+  paintOutput();
+}
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function paintOutput() {
+  if (!dithered) return;
+  const w = imgW, h = imgH;
+  outCanvas.width  = w;
+  outCanvas.height = h;
+  const id = outCtx.createImageData(w, h);
+
+  const useColor = mode === 'text';
+  const fg = useColor ? hexToRgb(fontColorPicker.value) : [0, 0, 0];
+  const bg = useColor ? hexToRgb(bgColorPicker.value)   : [255, 255, 255];
+
+  for (let i = 0; i < w * h; i++) {
+    const rgb = dithered[i] === 0 ? fg : bg;
+    id.data[i*4]   = rgb[0];
+    id.data[i*4+1] = rgb[1];
+    id.data[i*4+2] = rgb[2];
+    id.data[i*4+3] = 255;
+  }
+  outCtx.putImageData(id, 0, 0);
+  applyScale();
+
+  let black = 0;
+  for (let i = 0; i < dithered.length; i++) if (dithered[i] === 0) black++;
+  const pct = ((black / dithered.length) * 100).toFixed(1);
+  statsEl.innerHTML = `<span>${w}&thinsp;&times;&thinsp;${h}&thinsp;px</span><span>${pct}% black</span>`;
+
+  btnSvg.disabled = false;
+  btnPng.disabled = false;
+}
+
+function applyScale() {
+  const s = scale;
+  [srcCanvas, outCanvas].forEach(c => {
+    c.style.width  = (imgW * s) + 'px';
+    c.style.height = (imgH * s) + 'px';
+  });
+}
+
+// ============================================================
+// Image mode
+// ============================================================
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    imgW = img.naturalWidth;
+    imgH = img.naturalHeight;
+    srcCanvas.width  = imgW;
+    srcCanvas.height = imgH;
+    srcCtx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    showCanvas();
+    runDither();
+  };
+  img.src = url;
+}
+
+// ============================================================
+// Text mode
+// ============================================================
+let textRenderPending = false;
+
+function scheduleTextRender() {
+  if (textRenderPending) return;
+  textRenderPending = true;
+  requestAnimationFrame(() => { textRenderPending = false; renderText(); });
+}
+
+async function renderText() {
+  const text    = textInput.value || ' ';
+  const family  = fontFamilySel.value;
+  const weight  = fontWeightSel.value || 400;
+  const size    = +fontSizeSl.value;
+  const track   = +trackingSl.value;
+  const leading = +leadingSl.value / 100;
+  const pad     = +paddingSl.value;
+
+  // Load font from Google Fonts if needed
+  const entry = FONT_CATALOGUE.find(f => f.name === family);
+  if (entry) {
+    fontStatus.className = 'font-status loading';
+    await loadGoogleFont(family, entry.weights);
+    // Wait until the browser has the font available for canvas
+    try {
+      await document.fonts.load(`${weight} ${size}px "${family}"`);
+    } catch(e) {}
+    fontStatus.className = 'font-status ready';
+  }
+
+  // Measure and draw
+  const lineHeight = size * leading;
+  const lines = text.split('\n');
+
+  // Temp canvas to measure
+  const tmp = document.createElement('canvas');
+  const tc  = tmp.getContext('2d');
+  const fontStr = `${weight} ${size}px "${family}"`;
+  tc.font = fontStr;
+  tc.letterSpacing = track + 'px';
+
+  const lineWidths = lines.map(l => tc.measureText(l || ' ').width + Math.max(0, (l.length - 1) * track));
+  const canvasW = Math.ceil(Math.max(...lineWidths)) + pad * 2;
+  const canvasH = Math.ceil(lineHeight * lines.length) + pad * 2;
+
+  imgW = canvasW;
+  imgH = canvasH;
+  srcCanvas.width  = canvasW;
+  srcCanvas.height = canvasH;
+
+  // Background
+  srcCtx.fillStyle = fontColorPicker ? bgColorPicker.value : '#ffffff';
+  srcCtx.fillRect(0, 0, canvasW, canvasH);
+
+  // Draw text
+  srcCtx.font = fontStr;
+  srcCtx.letterSpacing = track + 'px';
+  srcCtx.fillStyle = fontColorPicker ? fontColorPicker.value : '#000000';
+  srcCtx.textBaseline = 'top';
+  lines.forEach((line, i) => {
+    srcCtx.fillText(line, pad, pad + i * lineHeight);
+  });
+
+  showCanvas();
+  runDither();
+}
+
+// ============================================================
+// Shared UI helpers
+// ============================================================
+function showCanvas() {
+  sourceReady = true;
+  empty.style.display = 'none';
+  wrap.style.display  = 'flex';
+}
+
+// ============================================================
+// SVG export
+// ============================================================
+function exportSVG() {
+  if (!dithered) return;
+  const w = imgW, h = imgH;
+  const rects = [];
+  for (let y = 0; y < h; y++) {
+    let x = 0;
+    while (x < w) {
+      if (dithered[y*w+x] === 0) {
+        let end = x;
+        while (end < w && dithered[y*w+end] === 0) end++;
+        rects.push(`<rect x="${x}" y="${y}" width="${end-x}" height="1"/>`);
+        x = end;
+      } else { x++; }
+    }
+  }
+  const svg = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" shape-rendering="crispEdges">`,
+    `<rect width="${w}" height="${h}" fill="white"/>`,
+    `<g fill="black">`,
+    rects.join('\n'),
+    `</g></svg>`,
+  ].join('\n');
+  download(new Blob([svg], { type: 'image/svg+xml' }), `dither-${algoSel.value}.svg`);
+}
+
+function exportPNG() {
+  outCanvas.toBlob(blob => download(blob, `dither-${algoSel.value}.png`));
+}
+
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+// ============================================================
+// Event listeners
+// ============================================================
+
+// Mode tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    mode = tab.dataset.mode;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+    tab.classList.add('on');
+
+    if (mode === 'image') {
+      imgSrcEl.style.display = 'flex';
+      txtSrcEl.style.display = 'none';
+      modeLabel.textContent = 'image converter';
+      // Reset to empty if no image was loaded
+      if (!sourceReady) { /* stay empty */ }
+    } else {
+      imgSrcEl.style.display = 'none';
+      txtSrcEl.style.display = 'flex';
+      modeLabel.textContent = 'text converter';
+      scheduleTextRender();
+    }
+  });
+});
+
+// Image upload
+fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('over');
+  loadFile(e.dataTransfer.files[0]);
+});
+
+// Text controls
+textInput.addEventListener('input', scheduleTextRender);
+fontFamilySel.addEventListener('change', () => {
+  updateWeightSelect(fontFamilySel.value);
+  scheduleTextRender();
+});
+fontWeightSel.addEventListener('change', scheduleTextRender);
+fontColorPicker.addEventListener('input', () => { scheduleTextRender(); paintOutput(); });
+bgColorPicker.addEventListener('input', () => { scheduleTextRender(); paintOutput(); });
+
+fontSizeSl.addEventListener('input', () => {
+  fontSizeV.textContent = fontSizeSl.value;
+  scheduleTextRender();
+});
+trackingSl.addEventListener('input', () => {
+  trackingV.textContent = trackingSl.value;
+  scheduleTextRender();
+});
+leadingSl.addEventListener('input', () => {
+  leadingV.textContent = leadingSl.value + '%';
+  scheduleTextRender();
+});
+paddingSl.addEventListener('input', () => {
+  paddingV.textContent = paddingSl.value;
+  scheduleTextRender();
+});
+
+// Shared dither controls
+algoSel.addEventListener('change', () => { descEl.textContent = DESCS[algoSel.value] || ''; runDither(); });
+thrSlider.addEventListener('input', () => { thrV.textContent = thrSlider.value; runDither(); });
+briSlider.addEventListener('input', () => { briV.textContent = briSlider.value; runDither(); });
+conSlider.addEventListener('input', () => { conV.textContent = conSlider.value; runDither(); });
+pixSlider.addEventListener('input', () => { pixV.textContent = pixSlider.value + 'px'; runDither(); });
+
+// Export
+btnSvg.addEventListener('click', exportSVG);
+btnPng.addEventListener('click', exportPNG);
+
+const SCALES = [0.25, 0.5, 1, 2, 4];
+
+function setScale(s) {
+  scale = s;
+  scaleRow.querySelectorAll('.sbtn').forEach(b => {
+    b.classList.toggle('on', parseFloat(b.dataset.s) === s);
+  });
+  applyScale();
+}
+
+// Scale buttons
+scaleRow.addEventListener('click', e => {
+  const btn = e.target.closest('.sbtn');
+  if (!btn) return;
+  setScale(parseFloat(btn.dataset.s));
+});
+
+// Zoom keyboard shortcuts (Cmd/Ctrl +/- to step, Cmd/Ctrl+0 to reset)
+document.addEventListener('keydown', e => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod) return;
+  if (e.key === '=' || e.key === '+') {
+    e.preventDefault();
+    const i = SCALES.indexOf(scale);
+    if (i < SCALES.length - 1) setScale(SCALES[i + 1]);
+  } else if (e.key === '-') {
+    e.preventDefault();
+    const i = SCALES.indexOf(scale);
+    if (i > 0) setScale(SCALES[i - 1]);
+  } else if (e.key === '0') {
+    e.preventDefault();
+    setScale(1);
+  }
+});
+
+// ============================================================
+// Init
+// ============================================================
+descEl.textContent = DESCS[algoSel.value];
+updateWeightSelect(fontFamilySel.value);
+</script>
+</body>
+</html>
