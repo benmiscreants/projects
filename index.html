@@ -337,14 +337,19 @@
       <div class="control">
         <div class="sec-label">Effect</div>
         <div class="row">
-          <label>Gravity</label>
-          <input type="range" id="disGravity" min="0" max="30" value="5">
-          <span class="val" id="disGravityV">0.05</span>
+          <label>Amount</label>
+          <input type="range" id="disAmount" min="0" max="100" value="100">
+          <span class="val" id="disAmountV">100%</span>
         </div>
         <div class="row">
-          <label>Speed</label>
-          <input type="range" id="disSpeed" min="1" max="20" value="5">
-          <span class="val" id="disSpeedV">5</span>
+          <label>Gravity</label>
+          <input type="range" id="disGravity" min="0" max="100" value="30">
+          <span class="val" id="disGravityV">30</span>
+        </div>
+        <div class="row">
+          <label>Angle</label>
+          <input type="range" id="disAngle" min="0" max="359" value="90">
+          <span class="val" id="disAngleV">90°</span>
         </div>
         <button class="btn" id="btnDisintegrate">Disintegrate</button>
       </div>
@@ -569,10 +574,12 @@ const modeLabel       = document.getElementById('modeLabel');
 const imgSrcEl        = document.getElementById('imgSrc');
 const txtSrcEl        = document.getElementById('txtSrc');
 const btnDisintegrate = document.getElementById('btnDisintegrate');
+const disAmountSl     = document.getElementById('disAmount');
+const disAmountV      = document.getElementById('disAmountV');
 const disGravitySl    = document.getElementById('disGravity');
 const disGravityV     = document.getElementById('disGravityV');
-const disSpeedSl      = document.getElementById('disSpeed');
-const disSpeedV       = document.getElementById('disSpeedV');
+const disAngleSl      = document.getElementById('disAngle');
+const disAngleV       = document.getElementById('disAngleV');
 
 // ============================================================
 // State
@@ -586,6 +593,7 @@ let scale        = 1;
 // Disintegration animation state
 let disAnimFrame = null;
 let disParticles = [];
+let disStaticMap = null;
 
 function stopDisintegration() {
   if (disAnimFrame) {
@@ -593,69 +601,84 @@ function stopDisintegration() {
     disAnimFrame = null;
   }
   disParticles = [];
+  disStaticMap = null;
 }
 
 function disintegrate() {
   stopDisintegration();
   if (!dithered) return;
 
-  const w  = imgW, h = imgH;
-  const cx = w / 2, cy = h / 2;
-  const speed   = +disSpeedSl.value;
-  const gravity = +disGravitySl.value / 100;
+  const w = imgW, h = imgH;
+  const amount   = +disAmountSl.value / 100;       // 0–1, how far the dissolve progresses
+  const gravity  = +disGravitySl.value / 100;       // 0–1, downward bias (bottom dissolves last)
+  const angleDeg = +disAngleSl.value;
+  const angleRad = angleDeg * Math.PI / 180;
+  const ax = Math.cos(angleRad), ay = Math.sin(angleRad);
 
-  // Collect foreground (black) pixel positions
+  const fg = mode === 'text' ? hexToRgb(fontColorPicker.value) : [0, 0, 0];
+  const bg = mode === 'text' ? hexToRgb(bgColorPicker.value)   : [255, 255, 255];
+  const bgFill = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+  const fgFill = `rgb(${fg[0]},${fg[1]},${fg[2]})`;
+
+  // Collect all foreground (black) pixels
   const blacks = [];
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++)
       if (dithered[y * w + x] === 0) blacks.push([x, y]);
 
-  // Subsample if too many for smooth animation
-  const MAX = 5000;
-  const every = blacks.length > MAX ? Math.ceil(blacks.length / MAX) : 1;
+  // Compute directional dissolve threshold for each pixel.
+  // threshold ∈ [0,1]: pixels with lower threshold dissolve first.
+  // Direction is set by angle; gravity biases bottom pixels to dissolve later.
+  const rawDots = blacks.map(([x, y]) => {
+    const nx = w > 1 ? (x / (w - 1)) - 0.5 : 0;
+    const ny = h > 1 ? (y / (h - 1)) - 0.5 : 0;
+    return nx * ax + ny * ay;
+  });
+  let minDot = Infinity, maxDot = -Infinity;
+  rawDots.forEach(d => { if (d < minDot) minDot = d; if (d > maxDot) maxDot = d; });
+  const dotRange = (maxDot - minDot) || 1;
 
-  const fg = mode === 'text' ? hexToRgb(fontColorPicker.value) : [0, 0, 0];
-  const bg = mode === 'text' ? hexToRgb(bgColorPicker.value)   : [255, 255, 255];
+  disParticles = blacks.map(([x, y], i) => {
+    const dir   = (rawDots[i] - minDot) / dotRange;          // 0–1 directional position
+    const grav  = gravity * (h > 1 ? y / (h - 1) : 0);      // heavier at bottom
+    const jitter = (Math.random() - 0.5) * 0.25;
+    const threshold = Math.min(1, Math.max(0, dir * (1 - gravity) + grav + jitter));
+    // Pre-bake a fixed noise offset so the static holds still
+    const noiseX = Math.max(0, Math.min(w - 1, x + Math.round((Math.random() - 0.5) * 6)));
+    const noiseY = Math.max(0, Math.min(h - 1, y + Math.round((Math.random() - 0.5) * 6)));
+    return { x, y, noiseX, noiseY, threshold };
+  });
 
-  disParticles = blacks
-    .filter((_, i) => i % every === 0)
-    .map(([x, y]) => {
-      const dx = x - cx, dy = y - cy;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const s = (speed / 5) * (0.5 + Math.random() * 2.5);
-      return {
-        x, y,
-        vx: (dx / dist) * s + (Math.random() - 0.5) * (speed / 5),
-        vy: (dy / dist) * s + (Math.random() - 0.5) * (speed / 5) - speed * 0.15,
-        life: 1.0,
-        decay: 0.006 + Math.random() * 0.01,
-      };
-    });
-
-  const bgFill = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-  const fgFill = `rgb(${fg[0]},${fg[1]},${fg[2]})`;
+  let progress = 0;
+  const STEP = 0.008; // animation speed per frame
 
   function tick() {
+    progress = Math.min(amount, progress + STEP);
+
     outCtx.fillStyle = bgFill;
     outCtx.fillRect(0, 0, w, h);
+    outCtx.fillStyle = fgFill;
 
-    let anyAlive = false;
     for (const p of disParticles) {
-      if (p.life <= 0) continue;
-      anyAlive = true;
-      p.x  += p.vx;
-      p.y  += p.vy;
-      p.vy += gravity;
-      p.life -= p.decay;
-      outCtx.globalAlpha = Math.max(0, p.life);
-      outCtx.fillStyle = fgFill;
-      outCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+      if (p.threshold < progress) {
+        outCtx.fillRect(p.noiseX, p.noiseY, 1, 1); // dissolved → static noise position
+      } else {
+        outCtx.fillRect(p.x, p.y, 1, 1);            // intact → original position
+      }
     }
-    outCtx.globalAlpha = 1;
 
-    if (anyAlive) {
+    if (progress < amount) {
       disAnimFrame = requestAnimationFrame(tick);
     } else {
+      // Hold final frame — build pixel map for SVG export
+      disStaticMap = new Uint8Array(w * h).fill(255);
+      for (const p of disParticles) {
+        if (p.threshold < amount) {
+          disStaticMap[p.noiseY * w + p.noiseX] = 0;
+        } else {
+          disStaticMap[p.y * w + p.x] = 0;
+        }
+      }
       disAnimFrame = null;
     }
   }
@@ -939,15 +962,16 @@ function showCanvas() {
 // SVG export
 // ============================================================
 function exportSVG() {
-  if (!dithered) return;
+  const src = disStaticMap || dithered;
+  if (!src) return;
   const w = imgW, h = imgH;
   const rects = [];
   for (let y = 0; y < h; y++) {
     let x = 0;
     while (x < w) {
-      if (dithered[y*w+x] === 0) {
+      if (src[y*w+x] === 0) {
         let end = x;
-        while (end < w && dithered[y*w+end] === 0) end++;
+        while (end < w && src[y*w+end] === 0) end++;
         rects.push(`<rect x="${x}" y="${y}" width="${end-x}" height="1"/>`);
         x = end;
       } else { x++; }
@@ -1041,11 +1065,14 @@ paddingSl.addEventListener('input', () => {
 
 // Disintegration controls
 btnDisintegrate.addEventListener('click', disintegrate);
-disGravitySl.addEventListener('input', () => {
-  disGravityV.textContent = (+disGravitySl.value / 100).toFixed(2);
+disAmountSl.addEventListener('input', () => {
+  disAmountV.textContent = disAmountSl.value + '%';
 });
-disSpeedSl.addEventListener('input', () => {
-  disSpeedV.textContent = disSpeedSl.value;
+disGravitySl.addEventListener('input', () => {
+  disGravityV.textContent = disGravitySl.value;
+});
+disAngleSl.addEventListener('input', () => {
+  disAngleV.textContent = disAngleSl.value + '°';
 });
 
 // Shared dither controls
